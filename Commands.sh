@@ -1,41 +1,27 @@
-#!/bin/bash
-
-# Error handling: Exit immediately if any command fails
+{ 
+# Error handling
 set -e
 
 # Mount partitions
-echo "===== MOUNTING PARTITIONS ====="
 mount /dev/sda3 /mnt
 mount /dev/sda1 /mnt/boot/efi
 
-# Run diagnostics
-echo "===== RUNNING DIAGNOSTICS ====="
-arch-chroot /mnt bash -c '
-echo -e "\n===== SYSTEM DIAGNOSTICS =====" > /diagnostics.txt
-date >> /diagnostics.txt
+# Diagnostic collection
+echo "===== SYSTEM DIAGNOSTICS ====="
+date
+echo -e "\n===== UEFI BOOT ENTRIES ====="
+efibootmgr -v || echo "efibootmgr not available"
+echo -e "\n===== BOOTLOADER FILES ====="
+ls -lR /boot
+echo -e "\n===== FSTAB CONTENT ====="
+cat /etc/fstab
+echo -e "\n===== SECURE BOOT STATUS ====="
+[ -d /sys/firmware/efi/efivars ] && \
+  od -An -t u1 /sys/firmware/efi/efivars/SecureBoot-* | head -c1 | \
+  awk '{print ($1 == 1) ? "ENABLED" : "DISABLED"}'
 
-echo -e "\n===== UEFI BOOT ENTRIES =====" >> /diagnostics.txt
-efibootmgr -v 2>>/diagnostics.txt
-
-echo -e "\n===== BOOTLOADER FILES =====" >> /diagnostics.txt
-ls -lR /boot 2>>/diagnostics.txt
-
-echo -e "\n===== JOURNAL LOGS =====" >> /diagnostics.txt
-journalctl -b -1 --no-pager 2>>/diagnostics.txt | head -n 100
-
-echo -e "\n===== KERNEL ERRORS =====" >> /diagnostics.txt
-dmesg -T -l err,alert,emerg 2>>/diagnostics.txt
-
-echo -e "\n===== FSTAB CONTENT =====" >> /diagnostics.txt
-cat /etc/fstab 2>>/diagnostics.txt
-
-echo -e "\n===== SECURE BOOT STATUS =====" >> /diagnostics.txt
-mokutil --sb-state 2>>/diagnostics.txt
-'
-
-# Install missing firmware
-echo "===== INSTALLING FIRMWARE ====="
-arch-chroot /mnt bash -c '
+# Install missing components
+echo -e "\n===== INSTALLING FIRMWARE ====="
 pacman -Sy --noconfirm \
     linux-firmware \
     upd72020x-fw \
@@ -43,34 +29,19 @@ pacman -Sy --noconfirm \
     aic94xx-firmware \
     qlogic-firmware \
     sbsigntools
-mkinitcpio -P
-'
 
-# Sign GRUB EFI
-echo "===== SIGNING GRUB ====="
-arch-chroot /mnt bash -c '
+# Sign GRUB
+echo -e "\n===== SIGNING GRUB ====="
 mkdir -p /etc/secureboot/keys
 cd /etc/secureboot/keys
-
-if [ ! -f db.key ]; then
-    openssl req -newkey rsa:4096 -nodes -keyout db.key \
-        -new -x509 -sha256 -days 3650 -subj "/CN=Arch Secure Boot Key/" -out db.crt
-fi
-
+openssl req -newkey rsa:4096 -nodes -keyout db.key \
+    -new -x509 -sha256 -days 3650 -subj "/CN=Arch SB Key/" -out db.crt
 sbsign --key db.key --cert db.crt \
     --output /boot/efi/EFI/GRUB/grubx64.efi.signed \
     /boot/efi/EFI/GRUB/grubx64.efi
-
 mv /boot/efi/EFI/GRUB/grubx64.efi.signed /boot/efi/EFI/GRUB/grubx64.efi
-'
 
-# Generate shareable diagnostic URL
-echo "===== GENERATING SHARE URL ====="
-curl --upload-file /mnt/diagnostics.txt https://transfer.sh/arch_diagnostics.txt
-
-# Final reboot preparation
-echo "===== OPERATION COMPLETE ====="
-echo "1. Diagnostics URL: (see above)"
-echo "2. Unmount and reboot:"
-echo "   umount -R /mnt"
-echo "   reboot"
+# Final status
+echo -e "\n===== OPERATION COMPLETE ====="
+echo "Firmware installed and GRUB signed successfully!"
+} | tee /tmp/diag.log | nc termbin.com 9999
