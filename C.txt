@@ -1,0 +1,11 @@
+echo "default arch.conf" > /boot/loader/loader.conf
+echo "timeout 3" >> /boot/loader/loader.conf
+
+cat > /boot/loader/entries/arch.conf <<EOF
+title   Arch Linux
+linux   /vmlinuz-linux
+initrd  /initramfs-linux.img
+options root=/dev/sdXn rw
+EOF
+
+options root=UUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx rw
