@@ -1,12 +1,1 @@
-mkinitcpio -P
 
-# Get the UUID of your root partition automatically
-ROOT_UUID=$(blkid -s UUID -o value $(findmnt -no SOURCE /))
-
-# Create the fallback entry
-cat > /boot/loader/entries/arch-fallback.conf <<EOF
-title   Arch Linux (Fallback)
-linux   /vmlinuz-linux
-initrd  /initramfs-linux-fallback.img
-options root=UUID=$ROOT_UUID rw
-EOF
