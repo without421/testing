@@ -1,36 +1,6 @@
-#!/bin/bash
-# Arch Linux systemd-boot setup script
-
-# 1. Mount root partition (replace /dev/sdXn with your root partition)
-mount /dev/sdXn /mnt
-
-# 2. Mount EFI partition (replace /dev/sda1 with your EFI partition)
-mount /dev/sda1 /mnt/boot
-
-# 3. Enter chroot
-arch-chroot /mnt <<'CHROOT'
-# Inside chroot:
-
-# 4. Ensure kernel is installed
-pacman -S --noconfirm linux
-
-# 5. Regenerate initramfs
 mkinitcpio -P
 
-# 6. Create systemd-boot entry with correct UUID
-ROOT_UUID=$(blkid -s UUID -o value /dev/sdXn)
-
-cat > /boot/loader/entries/arch.conf <<EOF
-title   Arch Linux
+title   Arch Linux (Fallback)
 linux   /vmlinuz-linux
-initrd  /initramfs-linux.img
-options root=UUID=$ROOT_UUID rw
-EOF
-
-# 7. Optional: set loader.conf defaults
-cat > /boot/loader/loader.conf <<EOF
-default arch.conf
-timeout 3
-editor no
-EOF
-CHROOT
+initrd  /initramfs-linux-fallback.img
+options root=UUID=<your-root-uuid> rw
