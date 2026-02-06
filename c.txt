@@ -1,5 +1,6 @@
-
 mkinitcpio -P
+
+ls -la /boot/vmlinuz-linux /boot/initramfs-linux.img
 
 # Get the UUID of your root partition automatically
 ROOT_UUID=$(blkid -s UUID -o value $(findmnt -no SOURCE /))
