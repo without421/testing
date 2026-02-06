@@ -1,9 +1,14 @@
-# Set hostname
-echo "archlinux" > /etc/hostname
 
-# Configure hosts file
-cat > /etc/hosts << EOF
-127.0.0.1 localhost
-::1 localhost
-127.0.1.1 archlinux.localdomain archlinux
+mkinitcpio -P
+
+# Get the UUID of your root partition automatically
+ROOT_UUID=$(blkid -s UUID -o value $(findmnt -no SOURCE /))
+
+# Create the entry
+cat > /boot/loader/entries/arch.conf <<EOF
+title   Arch Linux
+linux   /vmlinuz-linux
+initrd  /intel-ucode.img
+initrd  /initramfs-linux.img
+options root=UUID=$ROOT_UUID rw
 EOF
