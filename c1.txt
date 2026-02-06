@@ -1,15 +1,1 @@
-mkinitcpio -P
-
-ls -la /boot/vmlinuz-linux /boot/initramfs-linux.img
-
-# Get the UUID of your root partition automatically
-ROOT_UUID=$(blkid -s UUID -o value $(findmnt -no SOURCE /))
-
-# Create the entry
-cat > /boot/loader/entries/arch.conf <<EOF
-title   Arch Linux
-linux   /vmlinuz-linux
-initrd  /intel-ucode.img
-initrd  /initramfs-linux.img
-options root=UUID=$ROOT_UUID rw
-EOF
+sudo pacman -S xorg-server xorg-xinit dwm st firefox pipewire pipewire-pulse pipewire-alsa mpv xrdp xorgxrdp base-devel
