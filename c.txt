@@ -1,1 +1,107 @@
-sudo bash -c 'D=sda; P=$(lsblk -r | grep " /$" | awk "{print \$1}" | head -1); { echo "=== HDD HEALTH REPORT ==="; echo "Date: $(date)"; echo "Disk: /dev/$D"; echo "Root Partition: /dev/$P"; echo -e "\n--- SMART HEALTH ---"; smartctl -H /dev/$D 2>&1; echo -e "\n--- BAD SECTORS (CRITICAL) ---"; smartctl -A /dev/$D 2>&1 | grep -E "Reallocated|Pending|Uncorrectable"; echo -e "\n--- HDD MECHANICAL HEALTH ---"; smartctl -A /dev/$D 2>&1 | grep -E "Spin_Up_Time|Start_Stop|Seek_Error|Power_On_Hours"; echo -e "\n--- DISK ERRORS (Why RO?) ---"; dmesg 2>/dev/null | grep -iE "I/O error|remounting read-only|sector error|ata error|buffer i/o" | tail -5; echo -e "\n--- TEMPERATURE ---"; smartctl -A /dev/$D 2>&1 | grep -i temperature; echo -e "\n--- FILESYSTEM STATE ---"; tune2fs -l /dev/$P 2>/dev/null | grep -E "Filesystem state|Error count|Last check" || echo "Not ext4"; echo -e "\n--- MOUNT STATUS ---"; mount | grep "on / "; } | nc termbin.com 9999'
+sudo tee /usr/local/bin/mytor > /dev/null << 'ENDOFFILE'
+#!/bin/bash
+
+TRANS_PORT="9040"
+DNS_PORT="5353"
+PIDFILE="/run/mytor.pid"
+
+check_status() {
+    if ! systemctl is-active --quiet tor; then
+        [ -f "$PIDFILE" ] && sudo rm -f "$PIDFILE"
+        echo "Status: [INACTIVE]"
+        return 2
+    fi
+    
+    PROGRESS=$(sudo journalctl -u tor --since "2 minutes ago" --no-pager | grep "Bootstrapped" | tail -1 | grep -oP '\d+%' || echo "0%")
+    
+    if [ "$PROGRESS" = "100%" ]; then
+        IP=$(curl --socks5-hostname 127.0.0.1:9050 -s https://check.torproject.org/api/ip 2>/dev/null | grep -oP '"IP":"\K[^"]+' || echo "unknown")
+        echo "Status: [CONNECTED] (100%)"
+        echo "Exit IP: $IP"
+        return 0
+    else
+        echo "Status: [BOOTSTRAPPING] ($PROGRESS)"
+        return 1
+    fi
+}
+
+case "$1" in
+    start|"")
+        if systemctl is-active --quiet tor; then
+            echo "Tor is already running."
+            check_status
+            exit 0
+        fi
+
+        echo "Starting Tor service..."
+        sudo systemctl start tor || { echo "Failed to start Tor"; exit 1; }
+        
+        echo "Waiting for bootstrap (Ctrl+C to background)..."
+        echo "------------------------------------------------"
+        
+        timeout 60 sudo journalctl -u tor -f --since "5 seconds ago" | while read -r line; do
+            echo "$line"
+            
+            if echo "$line" | grep -qiE "(error|failed|unable to|exiting)"; then
+                echo "------------------------------------------------"
+                echo "✗ ERROR: Tor bootstrap failed!"
+                sudo systemctl stop tor
+                exit 1
+            fi
+            
+            if echo "$line" | grep -q "Bootstrapped 100%"; then
+                echo "------------------------------------------------"
+                echo "✓ DONE: Applying firewall rules..."
+                
+                sudo iptables -F
+                sudo iptables -t nat -F
+                
+                sudo iptables -t nat -A OUTPUT -d 127.0.0.1/32 -j RETURN
+                sudo iptables -t nat -A OUTPUT -m owner --uid-owner tor -j RETURN
+                sudo iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports $DNS_PORT
+                sudo iptables -t nat -A OUTPUT -p tcp --syn -j REDIRECT --to-ports $TRANS_PORT
+                sudo iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+                
+                echo "active" | sudo tee "$PIDFILE" > /dev/null
+                
+                echo "✓ SUCCESS: All traffic is now tunneled."
+                echo "Run 'mytor stop' to disconnect."
+                
+                pkill -P $$ journalctl 2>/dev/null
+                exit 0
+            fi
+        done
+        
+        if systemctl is-active --quiet tor; then
+            echo ""
+            echo "Bootstrap incomplete or interrupted. Tor still running."
+            echo "Run 'mytor status' to check progress."
+        fi
+        ;;
+
+    stop)
+        if [ ! -f "$PIDFILE" ] && ! systemctl is-active --quiet tor; then
+            echo "Tor is not running."
+            exit 0
+        fi
+        
+        echo "Restoring normal traffic..."
+        sudo iptables -F
+        sudo iptables -t nat -F
+        sudo systemctl stop tor
+        sudo rm -f "$PIDFILE"
+        echo "✓ Tor stopped and firewall cleared."
+        ;;
+
+    status)
+        check_status
+        ;;
+
+    *)
+        echo "Usage: mytor [start|stop|status]"
+        exit 1
+        ;;
+esac
+ENDOFFILE
+
+sudo chmod +x /usr/local/bin/mytor
